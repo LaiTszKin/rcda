@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-02-26
+
+### Added
+
+- Add multi-language support for Traditional Chinese, Simplified Chinese, and English.
+- Add language preference setting with system-locale auto detection and manual override.
+- Add localized default system prompts and localized tray menu labels.
+- Add i18n unit tests for language resolution and localized resources.
+
+### Changed
+
+- Redesign desktop UI and styles for clearer interaction flow.
+- Improve IME-aware input handling and keyboard behavior in the dialog.
+
 ## [0.2.0] - 2026-02-26
 
 ### Added

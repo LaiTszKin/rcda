@@ -1,5 +1,11 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { DEFAULT_CONFIG, AgentOption, ChatMessage } from "@shared/types.ts"
+import { AgentOption, ChatMessage } from "@shared/types.ts"
+import {
+  LanguagePreference,
+  getDefaultSystemPrompt,
+  getUIStrings,
+  resolveLanguage,
+} from "@shared/i18n.ts"
 import { callChatAPI, parseAgentResponse, translateText } from "./services/api"
 import { isIMEComposingKeyEvent } from "./utils/ime"
 import { getShortcutFromKeyboardEvent, isNewSessionShortcut } from "./utils/shortcut"
@@ -12,6 +18,7 @@ interface SettingsDraft {
   shortcut: string
   systemPrompt: string
   autoOpenDevTools: boolean
+  languagePreference: LanguagePreference
 }
 
 type DialogStage = "input" | "refining" | "confirming" | "translating" | "result"
@@ -66,6 +73,13 @@ export default function App() {
     setCopiedTranslated,
   } = useUIStore()
 
+  const systemLocale = useMemo(() => window.navigator.language || "en-US", [])
+  const activeLanguage = useMemo(
+    () => resolveLanguage(config.languagePreference, systemLocale),
+    [config.languagePreference, systemLocale],
+  )
+  const ui = useMemo(() => getUIStrings(activeLanguage), [activeLanguage])
+
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(config)
 
   useEffect(() => {
@@ -96,6 +110,10 @@ export default function App() {
     }
   }, [showSettings])
 
+  useEffect(() => {
+    document.documentElement.lang = activeLanguage
+  }, [activeLanguage])
+
   const canSend = useMemo(() => {
     return currentInput.trim().length > 0 && !isLoading
   }, [currentInput, isLoading])
@@ -117,18 +135,18 @@ export default function App() {
   const recoverAfterAbort = useCallback(
     (fallbackStage: DialogStage) => {
       if (isCancellingRef.current) {
-        addMessage({ role: "system", content: "已中止當前請求" })
+        addMessage({ role: "system", content: ui.requestAborted })
         isCancellingRef.current = false
       }
 
       setStage(optimizedText ? "confirming" : fallbackStage)
     },
-    [addMessage, optimizedText, setStage],
+    [addMessage, optimizedText, setStage, ui.requestAborted],
   )
 
   const ensureAPIReady = (): boolean => {
     if (!config.apiKey) {
-      setError("尚未配置 API Key，請先到設定頁完成配置")
+      setError(ui.apiKeyMissing)
       setShowSettings(true)
       return false
     }
@@ -153,8 +171,8 @@ export default function App() {
     }
 
     if (isNoChange) {
-      const reason = parsed.no_change_reason || "原文已足夠清楚，無需進一步調整。"
-      addMessage({ role: "assistant", content: `未進行修改：${reason}` })
+      const reason = parsed.no_change_reason || ui.noChangeReasonDefault
+      addMessage({ role: "assistant", content: `${ui.noChangePrefix}${reason}` })
       setOptimizedText(sourceText)
       setOptions([])
       setStage("translating")
@@ -199,7 +217,7 @@ export default function App() {
         recoverAfterAbort(previousStage)
         return
       }
-      setError(requestError instanceof Error ? requestError.message : "請求失敗")
+      setError(requestError instanceof Error ? requestError.message : ui.optimizeFailed)
     } finally {
       if (requestAbortControllerRef.current === abortController) {
         requestAbortControllerRef.current = null
@@ -210,7 +228,7 @@ export default function App() {
 
   const handleOptionSelect = async (option: AgentOption) => {
     if (option.id === "other") {
-      setCurrentInput("請描述你希望調整的方向：")
+      setCurrentInput(ui.refineDirectionPrompt)
       inputRef.current?.focus()
       return
     }
@@ -221,7 +239,9 @@ export default function App() {
 
     const baseText =
       optimizedText || messages.find((message) => message.role === "user")?.content || ""
-    const prompt = `請根據以下方向優化文字：${option.label}\n\n原文：${baseText}`
+    const prompt = ui.refinePromptTemplate
+      .replace("{label}", option.label)
+      .replace("{text}", baseText)
     const userMessage: ChatMessage = { role: "user", content: prompt }
     const previousStage = stage
     const abortController = new AbortController()
@@ -230,7 +250,7 @@ export default function App() {
       requestAbortControllerRef.current = abortController
       setLoading(true)
       setError(null)
-      addMessage({ role: "system", content: `已選擇：${option.label}` })
+      addMessage({ role: "system", content: `${ui.selectedPrefix}${option.label}` })
       addMessage(userMessage)
 
       const nextMessages = [...messages, userMessage]
@@ -240,7 +260,7 @@ export default function App() {
         recoverAfterAbort(previousStage)
         return
       }
-      setError(requestError instanceof Error ? requestError.message : "優化失敗")
+      setError(requestError instanceof Error ? requestError.message : ui.optimizeFailed)
     } finally {
       if (requestAbortControllerRef.current === abortController) {
         requestAbortControllerRef.current = null
@@ -257,7 +277,7 @@ export default function App() {
     const sourceText =
       optimizedText || messages.find((message) => message.role === "user")?.content || ""
     if (!sourceText) {
-      setError("沒有可翻譯的文字")
+      setError(ui.noTextToTranslate)
       return
     }
 
@@ -277,7 +297,7 @@ export default function App() {
         recoverAfterAbort(previousStage)
         return
       }
-      setError(requestError instanceof Error ? requestError.message : "翻譯失敗")
+      setError(requestError instanceof Error ? requestError.message : ui.translationFailed)
       setStage("confirming")
     } finally {
       if (requestAbortControllerRef.current === abortController) {
@@ -338,12 +358,31 @@ export default function App() {
       await saveConfig(settingsDraft)
       setShowSettings(false)
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存設定失敗")
+      setError(saveError instanceof Error ? saveError.message : ui.saveSettingsFailed)
     }
   }
 
   const handleResetPrompt = () => {
-    setSettingsDraft((prev) => ({ ...prev, systemPrompt: DEFAULT_CONFIG.systemPrompt }))
+    setSettingsDraft((prev) => ({
+      ...prev,
+      systemPrompt: getDefaultSystemPrompt(resolveLanguage(prev.languagePreference, systemLocale)),
+    }))
+  }
+
+  const handleLanguagePreferenceChange = (nextPreference: LanguagePreference) => {
+    setSettingsDraft((prev) => {
+      const currentLanguage = resolveLanguage(prev.languagePreference, systemLocale)
+      const nextLanguage = resolveLanguage(nextPreference, systemLocale)
+      const currentDefaultPrompt = getDefaultSystemPrompt(currentLanguage)
+      const shouldSyncPrompt =
+        !prev.systemPrompt.trim() || prev.systemPrompt.trim() === currentDefaultPrompt.trim()
+
+      return {
+        ...prev,
+        languagePreference: nextPreference,
+        systemPrompt: shouldSyncPrompt ? getDefaultSystemPrompt(nextLanguage) : prev.systemPrompt,
+      }
+    })
   }
 
   const handleNewSession = useCallback(() => {
@@ -415,10 +454,10 @@ export default function App() {
             onClick={() => setShowSettings(!showSettings)}
             type="button"
           >
-            SET
+            {ui.setButton}
           </button>
           <button className="title-bar-btn" onClick={() => void handleClose()} type="button">
-            EXIT
+            {ui.exitButton}
           </button>
         </div>
       </div>
@@ -427,7 +466,7 @@ export default function App() {
         {showSettings ? (
           <div className="settings-panel">
             <div className="settings-section">
-              <div className="settings-title">API 設定</div>
+              <div className="settings-title">{ui.apiSettings}</div>
               <div className="settings-field">
                 <label className="settings-label" htmlFor="api-endpoint">
                   Endpoint
@@ -471,10 +510,10 @@ export default function App() {
             </div>
 
             <div className="settings-section">
-              <div className="settings-title">快捷鍵與 Prompt</div>
+              <div className="settings-title">{ui.shortcutAndPrompt}</div>
               <div className="settings-field">
                 <label className="settings-label" htmlFor="shortcut">
-                  全局快捷鍵
+                  {ui.shortcutLabel}
                 </label>
                 <div className="shortcut-input">
                   <input
@@ -486,10 +525,26 @@ export default function App() {
                     readOnly
                   />
                 </div>
-                <div className="shortcut-hint">
-                  點擊輸入框後直接按下組合鍵即可設定（例：CommandOrControl+Shift+P）
-                </div>
-                <div className="shortcut-hint">預設新會話快捷鍵：CommandOrControl+N</div>
+                <div className="shortcut-hint">{ui.shortcutHint}</div>
+                <div className="shortcut-hint">{ui.newSessionHint}</div>
+              </div>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="language-preference">
+                  {ui.languageLabel}
+                </label>
+                <select
+                  id="language-preference"
+                  className="settings-input"
+                  value={settingsDraft.languagePreference}
+                  onChange={(event) =>
+                    handleLanguagePreferenceChange(event.target.value as LanguagePreference)
+                  }
+                >
+                  <option value="system">{ui.languageSystem}</option>
+                  <option value="zh-TW">{ui.languageZhTw}</option>
+                  <option value="zh-CN">{ui.languageZhCn}</option>
+                  <option value="en">{ui.languageEn}</option>
+                </select>
               </div>
               <div className="settings-field">
                 <label className="toggle-row" htmlFor="auto-open-devtools">
@@ -504,7 +559,7 @@ export default function App() {
                       }))
                     }
                   />
-                  <span>啟動時自動開啟 Developer Tools（僅開發模式）</span>
+                  <span>{ui.autoOpenDevTools}</span>
                 </label>
               </div>
               <div className="settings-field">
@@ -522,14 +577,14 @@ export default function App() {
               </div>
               <div className="result-actions">
                 <button className="copy-btn" onClick={handleResetPrompt} type="button">
-                  重置 Prompt
+                  {ui.resetPrompt}
                 </button>
                 <button
                   className="confirm-btn"
                   onClick={() => void handleSaveSettings()}
                   type="button"
                 >
-                  保存設定
+                  {ui.saveSettings}
                 </button>
               </div>
             </div>
@@ -541,11 +596,8 @@ export default function App() {
             {messages.length === 0 && stage === "input" ? (
               <div className="empty-state">
                 <div className="empty-icon">◌</div>
-                <div className="empty-title">開始優化文字</div>
-                <div className="empty-desc">
-                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc
-                  可中止請求或收起視窗，CommandOrControl+N 可開新會話。
-                </div>
+                <div className="empty-title">{ui.emptyTitle}</div>
+                <div className="empty-desc">{ui.emptyDescription}</div>
               </div>
             ) : (
               <div className="messages">
@@ -556,7 +608,10 @@ export default function App() {
                 ))}
 
                 {optimizedText && stage !== "result" ? (
-                  <div className="message assistant">優化預覽：{optimizedText}</div>
+                  <div className="message assistant">
+                    {ui.optimizedPreview}
+                    {optimizedText}
+                  </div>
                 ) : null}
               </div>
             )}
@@ -586,7 +641,7 @@ export default function App() {
                   onClick={() => void handleConfirmTranslation()}
                   type="button"
                 >
-                  確認並翻譯
+                  {ui.confirmAndTranslate}
                 </button>
               </div>
             ) : null}
@@ -594,7 +649,7 @@ export default function App() {
             {stage === "result" ? (
               <div className="result-container">
                 <div className="result-box">
-                  <div className="result-label">原文</div>
+                  <div className="result-label">{ui.originalText}</div>
                   <div className="result-text">{optimizedText}</div>
                   <div className="result-actions">
                     <button
@@ -602,12 +657,12 @@ export default function App() {
                       onClick={() => void handleCopy(optimizedText, "original")}
                       type="button"
                     >
-                      {copiedOriginal ? "已複製" : "複製原文"}
+                      {copiedOriginal ? ui.copied : ui.copyOriginal}
                     </button>
                   </div>
                 </div>
                 <div className="result-box">
-                  <div className="result-label">英文翻譯</div>
+                  <div className="result-label">{ui.translatedText}</div>
                   <div className="result-text">{translatedText}</div>
                   <div className="result-actions">
                     <button
@@ -615,10 +670,10 @@ export default function App() {
                       onClick={() => void handleCopy(translatedText, "translated")}
                       type="button"
                     >
-                      {copiedTranslated ? "已複製" : "複製譯文"}
+                      {copiedTranslated ? ui.copied : ui.copyTranslated}
                     </button>
                     <button className="confirm-btn" onClick={handleNewSession} type="button">
-                      新會話
+                      {ui.newSession}
                     </button>
                   </div>
                 </div>
@@ -630,7 +685,7 @@ export default function App() {
                 <textarea
                   ref={inputRef}
                   className="input-field"
-                  placeholder="輸入要優化的文字..."
+                  placeholder={ui.inputPlaceholder}
                   value={currentInput}
                   onChange={(event) => setCurrentInput(event.target.value)}
                   onCompositionStart={() => {
@@ -642,7 +697,7 @@ export default function App() {
                   onKeyDown={(event) => void handleEsc(event)}
                 />
                 <button className="send-btn" type="submit" disabled={!canSend}>
-                  發送
+                  {ui.send}
                 </button>
               </div>
             </form>

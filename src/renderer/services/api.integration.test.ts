@@ -9,6 +9,7 @@ const baseConfig: AppConfig = {
   shortcut: "CommandOrControl+Shift+P",
   autoOpenDevTools: false,
   systemPrompt: "system prompt",
+  languagePreference: "system",
 }
 
 afterEach(() => {

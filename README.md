@@ -8,6 +8,8 @@ It pops up instantly from anywhere on your system, helps you refine tone/clarity
 - Global shortcut to open a floating assistant window.
 - Interactive AI-based text polishing workflow.
 - One-click English translation after confirmation.
+- Multi-language UI support (Traditional Chinese, Simplified Chinese, English).
+- Auto language detection from system locale with manual override in settings.
 - API settings (OpenAI-compatible endpoint and key).
 - Custom system prompt and shortcut configuration.
 - Tray app behavior with quick open/settings/quit actions.

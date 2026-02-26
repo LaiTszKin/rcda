@@ -13,6 +13,8 @@ import {
 import * as path from "path"
 import Store from "electron-store"
 import type { AppConfig, SaveConfigResult } from "../shared/types"
+import { DEFAULT_CONFIG } from "../shared/types"
+import { getDefaultSystemPrompt, getMainStrings, resolveLanguage } from "../shared/i18n"
 
 interface StoredConfig {
   apiEndpoint: string
@@ -20,37 +22,9 @@ interface StoredConfig {
   shortcut: string
   systemPrompt: string
   autoOpenDevTools: boolean
+  languagePreference: AppConfig["languagePreference"]
   encryptedApiKey?: string
   apiKey?: string
-}
-
-const DEFAULT_CONFIG: AppConfig = {
-  apiEndpoint: "https://api.openai.com/v1",
-  apiKey: "",
-  model: "gpt-4o-mini",
-  shortcut: "CommandOrControl+Shift+P",
-  autoOpenDevTools: false,
-  systemPrompt: `你是一個專業的文字優化助手。你的任務是幫助用戶優化和潤色他們的文字。
-
-當用戶提供一段文字時，請：
-1. 分析文字的內容和意圖
-2. 提供 3-4 個優化方向選項供用戶選擇，每個選項應該簡潔明瞭
-3. 如果用戶選擇 "Other"，請詢問用戶具體想要如何調整
-
-請以 JSON 格式回應，格式如下：
-{
-  "analysis": "對用戶文字的簡要分析",
-  "optimized_text": "優化後的文字預覽（如果已有足夠信息）",
-  "options": [
-    { "id": "1", "label": "更正式的語氣", "description": "使用更專業和正式的表達方式" },
-    { "id": "2", "label": "更簡潔的表達", "description": "精簡文字，去除冗餘" },
-    { "id": "3", "label": "更具說服力", "description": "增強論點和說服力" },
-    { "id": "other", "label": "其他（自行輸入）", "description": "請描述您想要的調整方向" }
-  ],
-  "need_more_info": false
-}
-
-如果用戶的選擇已經足夠明確，可以直接返回優化後的文字，並設置 "need_more_info": false。`,
 }
 
 const store = new Store<{ config: Partial<StoredConfig> }>()
@@ -89,6 +63,8 @@ function decryptApiKey(encryptedApiKey?: string, fallbackPlain?: string): string
 
 function getConfig(): AppConfig {
   const savedConfig = store.get("config") ?? {}
+  const languagePreference = savedConfig.languagePreference ?? DEFAULT_CONFIG.languagePreference
+  const resolvedLanguage = resolveLanguage(languagePreference, app.getLocale())
 
   return {
     apiEndpoint: savedConfig.apiEndpoint ?? DEFAULT_CONFIG.apiEndpoint,
@@ -96,7 +72,8 @@ function getConfig(): AppConfig {
     model: savedConfig.model ?? DEFAULT_CONFIG.model,
     shortcut: savedConfig.shortcut ?? DEFAULT_CONFIG.shortcut,
     autoOpenDevTools: savedConfig.autoOpenDevTools ?? DEFAULT_CONFIG.autoOpenDevTools,
-    systemPrompt: savedConfig.systemPrompt ?? DEFAULT_CONFIG.systemPrompt,
+    systemPrompt: savedConfig.systemPrompt ?? getDefaultSystemPrompt(resolvedLanguage),
+    languagePreference,
   }
 }
 
@@ -109,6 +86,7 @@ function saveConfig(config: AppConfig): void {
     shortcut: config.shortcut,
     autoOpenDevTools: config.autoOpenDevTools,
     systemPrompt: config.systemPrompt,
+    languagePreference: config.languagePreference,
     encryptedApiKey,
   }
 
@@ -238,14 +216,26 @@ function createTray() {
   )
 
   tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  refreshTrayMenu()
+  tray.on("click", showWindow)
+}
+
+function refreshTrayMenu() {
+  if (!tray) {
+    return
+  }
+
+  const config = getConfig()
+  const language = resolveLanguage(config.languagePreference, app.getLocale())
+  const mainStrings = getMainStrings(language)
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "顯示視窗",
+      label: mainStrings.trayShowWindow,
       click: showWindow,
     },
     {
-      label: "設置",
+      label: mainStrings.traySettings,
       click: () => {
         showWindow()
         mainWindow?.webContents.send("open-settings")
@@ -253,16 +243,15 @@ function createTray() {
     },
     { type: "separator" },
     {
-      label: "退出",
+      label: mainStrings.trayQuit,
       click: () => {
         app.quit()
       },
     },
   ])
 
-  tray.setToolTip("Text Polish Agent")
+  tray.setToolTip(mainStrings.trayTooltip)
   tray.setContextMenu(contextMenu)
-  tray.on("click", showWindow)
 }
 
 app.whenReady().then(() => {
@@ -304,6 +293,7 @@ ipcMain.handle("save-config", (_, partial: Partial<AppConfig>): SaveConfigResult
   }
 
   saveConfig(nextConfig)
+  refreshTrayMenu()
   return { ok: true }
 })
 
