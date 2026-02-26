@@ -98,7 +98,7 @@ export default function App() {
     return true
   }
 
-  const runRefine = async (prompt: string, nextMessages: ChatMessage[]) => {
+  const runRefine = async (nextMessages: ChatMessage[]) => {
     const content = await callChatAPI(config, nextMessages)
     const parsed = parseAgentResponse(content)
 
@@ -112,10 +112,6 @@ export default function App() {
 
     setOptions(parsed.options)
     setStage(parsed.need_more_info ? "refining" : "confirming")
-
-    if (!parsed.need_more_info && !parsed.optimized_text) {
-      setOptimizedText(prompt)
-    }
   }
 
   const handleSend = async (event?: FormEvent) => {
@@ -135,7 +131,7 @@ export default function App() {
       addMessage(userMessage)
 
       const nextMessages = [...messages, userMessage]
-      await runRefine(trimmed, nextMessages)
+      await runRefine(nextMessages)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "請求失敗")
     } finally {
@@ -166,7 +162,7 @@ export default function App() {
       addMessage(userMessage)
 
       const nextMessages = [...messages, userMessage]
-      await runRefine(prompt, nextMessages)
+      await runRefine(nextMessages)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "優化失敗")
     } finally {

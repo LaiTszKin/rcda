@@ -158,15 +158,24 @@ export async function callChatAPI(config: AppConfig, messages: ChatMessage[]): P
 }
 
 export function parseAgentResponse(content: string): AgentResponse {
+  const normalized = content.trim()
+
   try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    const fencedMatch = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+    const jsonContent = fencedMatch ? fencedMatch[1] : normalized
+    const jsonMatch = jsonContent.match(/\{[\s\S]*\}/)
+
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
+      const hasOptimizedText = typeof parsed.optimized_text === "string" && !!parsed.optimized_text.trim()
+      const needMoreInfo =
+        typeof parsed.need_more_info === "boolean" ? parsed.need_more_info : !hasOptimizedText
+
       return {
         analysis: parsed.analysis || "",
         optimized_text: parsed.optimized_text || "",
         options: parsed.options || [],
-        need_more_info: parsed.need_more_info !== false,
+        need_more_info: needMoreInfo,
       }
     }
   } catch (error) {

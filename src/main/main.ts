@@ -116,6 +116,8 @@ function saveConfig(config: AppConfig): void {
 }
 
 function createWindow() {
+  const isMac = process.platform === "darwin"
+
   mainWindow = new BrowserWindow({
     width: 500,
     height: 600,
@@ -128,6 +130,7 @@ function createWindow() {
     alwaysOnTop: true,
     skipTaskbar: true,
     fullscreenable: false,
+    ...(isMac ? { type: "panel" as const } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -135,8 +138,11 @@ function createWindow() {
     },
   })
 
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  mainWindow.setAlwaysOnTop(true, "screen-saver")
+  mainWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  })
+  mainWindow.setAlwaysOnTop(true, "floating")
 
   if (!app.isPackaged) {
     mainWindow.loadURL("http://localhost:5173")

@@ -43,6 +43,20 @@ describe("parseAgentResponse", () => {
     expect(response.need_more_info).toBe(false)
   })
 
+  it("缺少 need_more_info 時，若有 optimized_text 應直接視為可確認", () => {
+    const response = parseAgentResponse('{"analysis":"分析","optimized_text":"已優化","options":[]}')
+
+    expect(response.optimized_text).toBe("已優化")
+    expect(response.need_more_info).toBe(false)
+  })
+
+  it("缺少 need_more_info 且無 optimized_text 時，應要求更多資訊", () => {
+    const response = parseAgentResponse('{"analysis":"分析","options":[]}')
+
+    expect(response.optimized_text).toBe("")
+    expect(response.need_more_info).toBe(true)
+  })
+
   it("非 JSON 回應時應回退為純文字結果", () => {
     const content = "這是一段純文字回應"
     const response = parseAgentResponse(content)
