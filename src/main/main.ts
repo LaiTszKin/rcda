@@ -19,6 +19,7 @@ interface StoredConfig {
   model: string
   shortcut: string
   systemPrompt: string
+  autoOpenDevTools: boolean
   encryptedApiKey?: string
   apiKey?: string
 }
@@ -28,6 +29,7 @@ const DEFAULT_CONFIG: AppConfig = {
   apiKey: "",
   model: "gpt-4o-mini",
   shortcut: "CommandOrControl+Shift+P",
+  autoOpenDevTools: false,
   systemPrompt: `你是一個專業的文字優化助手。你的任務是幫助用戶優化和潤色他們的文字。
 
 當用戶提供一段文字時，請：
@@ -93,6 +95,7 @@ function getConfig(): AppConfig {
     apiKey: decryptApiKey(savedConfig.encryptedApiKey, savedConfig.apiKey),
     model: savedConfig.model ?? DEFAULT_CONFIG.model,
     shortcut: savedConfig.shortcut ?? DEFAULT_CONFIG.shortcut,
+    autoOpenDevTools: savedConfig.autoOpenDevTools ?? DEFAULT_CONFIG.autoOpenDevTools,
     systemPrompt: savedConfig.systemPrompt ?? DEFAULT_CONFIG.systemPrompt,
   }
 }
@@ -104,6 +107,7 @@ function saveConfig(config: AppConfig): void {
     apiEndpoint: config.apiEndpoint,
     model: config.model,
     shortcut: config.shortcut,
+    autoOpenDevTools: config.autoOpenDevTools,
     systemPrompt: config.systemPrompt,
     encryptedApiKey,
   }
@@ -117,6 +121,7 @@ function saveConfig(config: AppConfig): void {
 
 function createWindow() {
   const isMac = process.platform === "darwin"
+  const config = getConfig()
 
   mainWindow = new BrowserWindow({
     width: 500,
@@ -146,7 +151,9 @@ function createWindow() {
 
   if (!app.isPackaged) {
     mainWindow.loadURL("http://localhost:5173")
-    mainWindow.webContents.openDevTools({ mode: "detach" })
+    if (config.autoOpenDevTools) {
+      mainWindow.webContents.openDevTools({ mode: "detach" })
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"))
   }

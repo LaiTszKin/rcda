@@ -1,6 +1,7 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DEFAULT_CONFIG, AgentOption, ChatMessage } from "@shared/types.ts"
 import { callChatAPI, parseAgentResponse, translateText } from "./services/api"
+import { isIMEComposingKeyEvent } from "./utils/ime"
 import { getShortcutFromKeyboardEvent, isNewSessionShortcut } from "./utils/shortcut"
 import { useConfigStore, useDialogStore, useUIStore } from "./stores"
 
@@ -10,6 +11,7 @@ interface SettingsDraft {
   model: string
   shortcut: string
   systemPrompt: string
+  autoOpenDevTools: boolean
 }
 
 type DialogStage = "input" | "refining" | "confirming" | "translating" | "result"
@@ -34,6 +36,7 @@ export default function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const requestAbortControllerRef = useRef<AbortController | null>(null)
   const isCancellingRef = useRef(false)
+  const isIMEComposingRef = useRef(false)
   const { config, isLoaded, loadConfig, saveConfig } = useConfigStore()
   const {
     stage,
@@ -305,6 +308,15 @@ export default function App() {
   }
 
   const handleEsc = async (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      isIMEComposingKeyEvent(
+        event.nativeEvent as globalThis.KeyboardEvent & { keyCode?: number },
+        isIMEComposingRef.current,
+      )
+    ) {
+      return
+    }
+
     if (event.key === "Escape") {
       event.preventDefault()
       if (isLoading && cancelCurrentRequest()) {
@@ -387,18 +399,26 @@ export default function App() {
 
   return (
     <div className="app-container">
+      <div className="tech-grid" aria-hidden="true" />
+      <div className="noise-layer" aria-hidden="true" />
       <div className="title-bar">
-        <div className="title-bar-title">Text Polish Agent</div>
+        <div className="title-bar-title-wrap">
+          <span className="status-dot" />
+          <div className="title-bar-title-block">
+            <div className="title-bar-title">TEXT POLISH AGENT</div>
+            <div className="title-bar-subtitle">BLACK.WH/ FUTURE UI</div>
+          </div>
+        </div>
         <div className="title-bar-buttons">
           <button
             className="title-bar-btn"
             onClick={() => setShowSettings(!showSettings)}
             type="button"
           >
-            ⚙
+            SET
           </button>
           <button className="title-bar-btn" onClick={() => void handleClose()} type="button">
-            ✕
+            EXIT
           </button>
         </div>
       </div>
@@ -472,6 +492,22 @@ export default function App() {
                 <div className="shortcut-hint">預設新會話快捷鍵：CommandOrControl+N</div>
               </div>
               <div className="settings-field">
+                <label className="toggle-row" htmlFor="auto-open-devtools">
+                  <input
+                    id="auto-open-devtools"
+                    type="checkbox"
+                    checked={settingsDraft.autoOpenDevTools}
+                    onChange={(event) =>
+                      setSettingsDraft((prev) => ({
+                        ...prev,
+                        autoOpenDevTools: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>啟動時自動開啟 Developer Tools（僅開發模式）</span>
+                </label>
+              </div>
+              <div className="settings-field">
                 <label className="settings-label" htmlFor="system-prompt">
                   System Prompt
                 </label>
@@ -504,7 +540,7 @@ export default function App() {
 
             {messages.length === 0 && stage === "input" ? (
               <div className="empty-state">
-                <div className="empty-icon">✨</div>
+                <div className="empty-icon">◌</div>
                 <div className="empty-title">開始優化文字</div>
                 <div className="empty-desc">
                   輸入文字後按 Enter 發送，Shift+Enter 換行，Esc
@@ -597,6 +633,12 @@ export default function App() {
                   placeholder="輸入要優化的文字..."
                   value={currentInput}
                   onChange={(event) => setCurrentInput(event.target.value)}
+                  onCompositionStart={() => {
+                    isIMEComposingRef.current = true
+                  }}
+                  onCompositionEnd={() => {
+                    isIMEComposingRef.current = false
+                  }}
                   onKeyDown={(event) => void handleEsc(event)}
                 />
                 <button className="send-btn" type="submit" disabled={!canSend}>

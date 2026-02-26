@@ -4,6 +4,7 @@ export interface AppConfig {
   model: string
   shortcut: string
   systemPrompt: string
+  autoOpenDevTools: boolean
 }
 
 export interface SaveConfigResult {
@@ -16,6 +17,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   apiKey: "",
   model: "gpt-4o-mini",
   shortcut: "CommandOrControl+Shift+P",
+  autoOpenDevTools: false,
   systemPrompt: `你是一個專業的文字優化助手。你的任務是幫助用戶優化和潤色他們的文字。
 
 當用戶提供一段文字時，請：

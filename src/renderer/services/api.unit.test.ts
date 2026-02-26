@@ -7,6 +7,7 @@ const baseConfig: AppConfig = {
   apiKey: "sk-test",
   model: "gpt-4o-mini",
   shortcut: "CommandOrControl+Shift+P",
+  autoOpenDevTools: false,
   systemPrompt: "system prompt",
 }
 
