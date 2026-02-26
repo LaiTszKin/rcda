@@ -41,6 +41,22 @@ npm run build
 - CI checks run by change scope through GitHub Actions.
 - Packaging and GitHub Release are triggered manually from the `Build and Release` workflow.
 
+## macOS Self-Signing (Local Testing)
+
+If the downloaded app cannot be opened on macOS because it is unsigned/not notarized, you can self-sign it for local use:
+
+```bash
+codesign --force --deep --sign - "/Applications/Text Polish Agent.app"
+xattr -dr com.apple.quarantine "/Applications/Text Polish Agent.app"
+codesign --verify --deep --strict --verbose=2 "/Applications/Text Polish Agent.app"
+```
+
+Notes:
+
+- `--sign -` performs ad-hoc signing (local trust only).
+- This is suitable for personal testing but not for public distribution.
+- For public release, use Apple Developer ID signing and notarization.
+
 ## License
 
 MIT License. See the [LICENSE](./LICENSE) file.
