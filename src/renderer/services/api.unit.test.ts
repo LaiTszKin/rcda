@@ -46,7 +46,9 @@ describe("parseAgentResponse", () => {
   })
 
   it("缺少 need_more_info 時，若有 optimized_text 應直接視為可確認", () => {
-    const response = parseAgentResponse('{"analysis":"分析","optimized_text":"已優化","options":[]}')
+    const response = parseAgentResponse(
+      '{"analysis":"分析","optimized_text":"已優化","options":[]}',
+    )
 
     expect(response.optimized_text).toBe("已優化")
     expect(response.need_more_info).toBe(false)
@@ -197,7 +199,9 @@ describe("callChatAPI", () => {
     abortError.name = "AbortError"
 
     const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError)
-    await expect(callChatAPI(baseConfig, [{ role: "user", content: "hello" }])).rejects.toMatchObject({
+    await expect(
+      callChatAPI(baseConfig, [{ role: "user", content: "hello" }]),
+    ).rejects.toMatchObject({
       name: "AbortError",
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)

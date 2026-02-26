@@ -62,8 +62,10 @@ function buildContinuationMessageEnvelope(): string {
 }
 
 function parseNoChangePayload(parsed: any): ParsedNoChangePayload {
-  const noChangeReason = typeof parsed.no_change_reason === "string" ? parsed.no_change_reason.trim() : ""
-  const noChange = typeof parsed.no_change === "boolean" ? parsed.no_change : noChangeReason.length > 0
+  const noChangeReason =
+    typeof parsed.no_change_reason === "string" ? parsed.no_change_reason.trim() : ""
+  const noChange =
+    typeof parsed.no_change === "boolean" ? parsed.no_change : noChangeReason.length > 0
 
   return {
     no_change: noChange,
@@ -317,7 +319,8 @@ export function parseAgentResponse(content: string): AgentResponse {
 
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
-      const hasOptimizedText = typeof parsed.optimized_text === "string" && !!parsed.optimized_text.trim()
+      const hasOptimizedText =
+        typeof parsed.optimized_text === "string" && !!parsed.optimized_text.trim()
       const needMoreInfo =
         typeof parsed.need_more_info === "boolean" ? parsed.need_more_info : !hasOptimizedText
       const noChange = parseNoChangePayload(parsed)

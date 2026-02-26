@@ -507,7 +507,8 @@ export default function App() {
                 <div className="empty-icon">✨</div>
                 <div className="empty-title">開始優化文字</div>
                 <div className="empty-desc">
-                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc 可中止請求或收起視窗，CommandOrControl+N 可開新會話。
+                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc
+                  可中止請求或收起視窗，CommandOrControl+N 可開新會話。
                 </div>
               </div>
             ) : (
