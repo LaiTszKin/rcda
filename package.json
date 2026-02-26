@@ -1,6 +1,6 @@
 {
   "name": "text-polish-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "桌面文字優化助手 - 通過 AI Agent 協助優化和翻譯文字",
   "main": "dist/main/main.js",
   "scripts": {
