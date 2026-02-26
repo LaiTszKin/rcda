@@ -55,4 +55,6 @@ export interface AgentResponse {
   optimized_text: string
   options: AgentOption[]
   need_more_info: boolean
+  no_change: boolean
+  no_change_reason: string
 }

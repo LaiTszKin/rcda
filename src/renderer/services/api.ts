@@ -9,6 +9,50 @@ interface ChatRequestOptions {
   maxTokens?: number
 }
 
+interface ParsedNoChangePayload {
+  no_change: boolean
+  reason: string
+}
+
+function buildSystemPromptEnvelope(systemPrompt: string): string {
+  return JSON.stringify(
+    {
+      prompt_type: "text_polish_core_instructions",
+      core_guidelines: systemPrompt,
+      output_contract: {
+        format: "json",
+        required_fields: ["analysis", "optimized_text", "options", "need_more_info"],
+        optional_fields: ["no_change_reason"],
+      },
+      no_change_rule:
+        "若內容無需修改，需說明 no_change_reason，optimized_text 保持原文，並設置 need_more_info 為 false",
+    },
+    null,
+    2,
+  )
+}
+
+function buildUserMessageEnvelope(content: string): string {
+  return JSON.stringify(
+    {
+      task: "optimize_text",
+      text_to_optimize: content,
+    },
+    null,
+    2,
+  )
+}
+
+function parseNoChangePayload(parsed: any): ParsedNoChangePayload {
+  const noChangeReason = typeof parsed.no_change_reason === "string" ? parsed.no_change_reason.trim() : ""
+  const noChange = typeof parsed.no_change === "boolean" ? parsed.no_change : noChangeReason.length > 0
+
+  return {
+    no_change: noChange,
+    reason: noChangeReason,
+  }
+}
+
 function buildRequestBody(config: AppConfig, messages: ChatMessage[], options: ChatRequestOptions) {
   return {
     model: config.model,
@@ -139,9 +183,20 @@ async function requestWithRetry(
 }
 
 export async function callChatAPI(config: AppConfig, messages: ChatMessage[]): Promise<string> {
+  const normalizedMessages = messages.map((message) => {
+    if (message.role !== "user") {
+      return message
+    }
+
+    return {
+      ...message,
+      content: buildUserMessageEnvelope(message.content),
+    }
+  })
+
   const requestMessages: ChatMessage[] = [
-    { role: "system", content: config.systemPrompt },
-    ...messages,
+    { role: "system", content: buildSystemPromptEnvelope(config.systemPrompt) },
+    ...normalizedMessages,
   ]
 
   try {
@@ -170,12 +225,15 @@ export function parseAgentResponse(content: string): AgentResponse {
       const hasOptimizedText = typeof parsed.optimized_text === "string" && !!parsed.optimized_text.trim()
       const needMoreInfo =
         typeof parsed.need_more_info === "boolean" ? parsed.need_more_info : !hasOptimizedText
+      const noChange = parseNoChangePayload(parsed)
 
       return {
         analysis: parsed.analysis || "",
         optimized_text: parsed.optimized_text || "",
         options: parsed.options || [],
         need_more_info: needMoreInfo,
+        no_change: noChange.no_change,
+        no_change_reason: noChange.reason,
       }
     }
   } catch (error) {
@@ -187,6 +245,8 @@ export function parseAgentResponse(content: string): AgentResponse {
     optimized_text: content,
     options: [],
     need_more_info: false,
+    no_change: false,
+    no_change_reason: "",
   }
 }
 

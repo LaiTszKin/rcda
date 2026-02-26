@@ -1,6 +1,7 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DEFAULT_CONFIG, AgentOption, ChatMessage } from "@shared/types.ts"
 import { callChatAPI, parseAgentResponse, translateText } from "./services/api"
+import { getShortcutFromKeyboardEvent, isNewSessionShortcut } from "./utils/shortcut"
 import { useConfigStore, useDialogStore, useUIStore } from "./stores"
 
 interface SettingsDraft {
@@ -101,9 +102,30 @@ export default function App() {
   const runRefine = async (nextMessages: ChatMessage[]) => {
     const content = await callChatAPI(config, nextMessages)
     const parsed = parseAgentResponse(content)
+    const firstUserMessage = nextMessages.find((message) => message.role === "user")?.content || ""
+    const baselineText = optimizedText || firstUserMessage
+    const optimized = parsed.optimized_text.trim()
+    const sourceText = optimized || baselineText
+    const isNoChange =
+      !parsed.need_more_info &&
+      !!baselineText &&
+      (parsed.no_change || !!parsed.no_change_reason || optimized === baselineText.trim())
 
     if (parsed.analysis) {
       addMessage({ role: "assistant", content: parsed.analysis })
+    }
+
+    if (isNoChange) {
+      const reason = parsed.no_change_reason || "原文已足夠清楚，無需進一步調整。"
+      addMessage({ role: "assistant", content: `未進行修改：${reason}` })
+      setOptimizedText(sourceText)
+      setOptions([])
+      setStage("translating")
+
+      const translated = await translateText(config, sourceText)
+      setTranslatedText(translated)
+      setStage("result")
+      return
     }
 
     if (parsed.optimized_text) {
@@ -244,11 +266,38 @@ export default function App() {
     setSettingsDraft((prev) => ({ ...prev, systemPrompt: DEFAULT_CONFIG.systemPrompt }))
   }
 
-  const handleNewSession = () => {
+  const handleNewSession = useCallback(() => {
     reset()
     setCopiedOriginal(false)
     setCopiedTranslated(false)
+  }, [reset, setCopiedOriginal, setCopiedTranslated])
+
+  const handleShortcutCapture = (event: KeyboardEvent<HTMLInputElement>) => {
+    event.preventDefault()
+    const shortcut = getShortcutFromKeyboardEvent(event)
+    if (!shortcut) {
+      return
+    }
+
+    setSettingsDraft((prev) => ({ ...prev, shortcut }))
   }
+
+  const handleGlobalNewSession = useCallback(
+    (event: globalThis.KeyboardEvent) => {
+      if (showSettings || !isNewSessionShortcut(event)) {
+        return
+      }
+
+      event.preventDefault()
+      handleNewSession()
+    },
+    [handleNewSession, showSettings],
+  )
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleGlobalNewSession)
+    return () => window.removeEventListener("keydown", handleGlobalNewSession)
+  }, [handleGlobalNewSession])
 
   if (!isLoaded) {
     return <LoadingDots />
@@ -325,15 +374,20 @@ export default function App() {
                 <label className="settings-label" htmlFor="shortcut">
                   全局快捷鍵
                 </label>
-                <input
-                  id="shortcut"
-                  className="settings-input"
-                  value={settingsDraft.shortcut}
-                  onChange={(event) =>
-                    setSettingsDraft((prev) => ({ ...prev, shortcut: event.target.value }))
-                  }
-                />
-                <div className="shortcut-hint">例：CommandOrControl+Shift+P</div>
+                <div className="shortcut-input">
+                  <input
+                    id="shortcut"
+                    className="shortcut-display"
+                    value={settingsDraft.shortcut}
+                    onKeyDown={handleShortcutCapture}
+                    onFocus={(event) => event.currentTarget.select()}
+                    readOnly
+                  />
+                </div>
+                <div className="shortcut-hint">
+                  點擊輸入框後直接按下組合鍵即可設定（例：CommandOrControl+Shift+P）
+                </div>
+                <div className="shortcut-hint">預設新會話快捷鍵：CommandOrControl+N</div>
               </div>
               <div className="settings-field">
                 <label className="settings-label" htmlFor="system-prompt">
@@ -371,7 +425,7 @@ export default function App() {
                 <div className="empty-icon">✨</div>
                 <div className="empty-title">開始優化文字</div>
                 <div className="empty-desc">
-                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc 可收起視窗。
+                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc 可收起視窗，CommandOrControl+N 可開新會話。
                 </div>
               </div>
             ) : (

@@ -41,6 +41,8 @@ describe("parseAgentResponse", () => {
     expect(response.optimized_text).toBe("優化文案")
     expect(response.options).toHaveLength(1)
     expect(response.need_more_info).toBe(false)
+    expect(response.no_change).toBe(false)
+    expect(response.no_change_reason).toBe("")
   })
 
   it("缺少 need_more_info 時，若有 optimized_text 應直接視為可確認", () => {
@@ -48,6 +50,7 @@ describe("parseAgentResponse", () => {
 
     expect(response.optimized_text).toBe("已優化")
     expect(response.need_more_info).toBe(false)
+    expect(response.no_change).toBe(false)
   })
 
   it("缺少 need_more_info 且無 optimized_text 時，應要求更多資訊", () => {
@@ -55,6 +58,16 @@ describe("parseAgentResponse", () => {
 
     expect(response.optimized_text).toBe("")
     expect(response.need_more_info).toBe(true)
+    expect(response.no_change).toBe(false)
+  })
+
+  it("有 no_change_reason 時應回傳不修改資訊", () => {
+    const response = parseAgentResponse(
+      '{"analysis":"分析","optimized_text":"原文","options":[],"need_more_info":false,"no_change_reason":"語句已完整"}',
+    )
+
+    expect(response.no_change).toBe(true)
+    expect(response.no_change_reason).toBe("語句已完整")
   })
 
   it("非 JSON 回應時應回退為純文字結果", () => {
@@ -65,6 +78,8 @@ describe("parseAgentResponse", () => {
     expect(response.optimized_text).toBe(content)
     expect(response.options).toEqual([])
     expect(response.need_more_info).toBe(false)
+    expect(response.no_change).toBe(false)
+    expect(response.no_change_reason).toBe("")
   })
 })
 
@@ -88,8 +103,15 @@ describe("callChatAPI", () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
     expect(requestBody.stream).toBe(true)
-    expect(requestBody.messages[0]).toEqual({ role: "system", content: baseConfig.systemPrompt })
-    expect(requestBody.messages[1]).toEqual(messages[0])
+    const systemMessage = requestBody.messages[0]
+    expect(systemMessage.role).toBe("system")
+    expect(systemMessage.content).toContain('"core_guidelines": "system prompt"')
+
+    const wrappedUserMessage = JSON.parse(String(requestBody.messages[1]?.content))
+    expect(wrappedUserMessage).toEqual({
+      task: "optimize_text",
+      text_to_optimize: "hello",
+    })
   })
 
   it("串流失敗時應回退至非串流", async () => {
