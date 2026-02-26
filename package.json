@@ -32,7 +32,6 @@
     },
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "assets/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -42,7 +41,6 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
