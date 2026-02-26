@@ -28,6 +28,16 @@ npm install
 npm run dev
 ```
 
+## Docker + Makefile
+
+```bash
+make run
+make stop
+make restart
+make update
+make build
+```
+
 ## Quality Checks
 
 ```bash
@@ -36,10 +46,9 @@ npm test
 npm run build
 ```
 
-## Release
+## CI
 
 - CI checks run by change scope through GitHub Actions.
-- Packaging and GitHub Release are triggered manually from the `Build and Release` workflow.
 
 ## macOS Self-Signing (Local Testing)
 
