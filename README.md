@@ -1,6 +1,7 @@
 # Text Polish Agent
 
-Text Polish Agent is a desktop application built with Electron + React for quick writing assistance.
+Text Polish Agent is a hotkey-first desktop app for polishing and translating text with AI.
+It pops up instantly from anywhere on your system, helps you refine tone/clarity through interactive options, then generates an English translation you can copy in one click.
 
 ## Features
 
