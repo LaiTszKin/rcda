@@ -10,7 +10,7 @@ restart:
 	docker compose down && docker compose up -d && npm run dev:desktop
 
 update:
-	git pull && bash scripts/update_env.sh && docker compose build
+	git pull && docker compose build
 
 build:
 	docker compose build --no-cache
