@@ -86,7 +86,7 @@ function decryptApiKey(encryptedApiKey?: string, fallbackPlain?: string): string
 }
 
 function getConfig(): AppConfig {
-  const savedConfig = store.get("config")
+  const savedConfig = store.get("config") ?? {}
 
   return {
     apiEndpoint: savedConfig.apiEndpoint ?? DEFAULT_CONFIG.apiEndpoint,
@@ -263,8 +263,8 @@ app.whenReady().then(() => {
   app.dock?.hide()
 })
 
-app.on("window-all-closed", (event: Electron.Event) => {
-  event.preventDefault()
+app.on("window-all-closed", () => {
+  // Keep tray app alive when all windows are hidden/closed.
 })
 
 app.on("before-quit", () => {
