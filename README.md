@@ -38,6 +38,9 @@ make update
 make build
 ```
 
+- `make run`: start Docker services, then launch Electron desktop app on host.
+- `make stop`: stop Docker services.
+
 ## Quality Checks
 
 ```bash
