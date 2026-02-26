@@ -1,17 +1,24 @@
 import { AppConfig, ChatMessage, AgentResponse } from "@shared/types.ts"
 
 const DEFAULT_RETRY_TIMES = 2
+const MAX_CONTINUATION_ROUNDS = 3
 const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504])
 
 interface ChatRequestOptions {
   stream?: boolean
   temperature?: number
   maxTokens?: number
+  signal?: AbortSignal
 }
 
 interface ParsedNoChangePayload {
   no_change: boolean
   reason: string
+}
+
+interface ChatCompletionResult {
+  content: string
+  finishReason: string | null
 }
 
 function buildSystemPromptEnvelope(systemPrompt: string): string {
@@ -37,6 +44,17 @@ function buildUserMessageEnvelope(content: string): string {
     {
       task: "optimize_text",
       text_to_optimize: content,
+    },
+    null,
+    2,
+  )
+}
+
+function buildContinuationMessageEnvelope(): string {
+  return JSON.stringify(
+    {
+      task: "continue_output",
+      instruction: "請延續上一段輸出並僅返回尚未輸出的內容，不要重複已輸出段落。",
     },
     null,
     2,
@@ -77,7 +95,7 @@ async function parseErrorMessage(response: Response, fallbackPrefix: string): Pr
   return payload.error?.message ?? `${fallbackPrefix}: ${response.status}`
 }
 
-async function readStreamToText(response: Response): Promise<string> {
+async function readStreamToText(response: Response): Promise<ChatCompletionResult> {
   if (!response.body) {
     throw new Error("API 返回格式異常：無法讀取串流內容")
   }
@@ -86,6 +104,7 @@ async function readStreamToText(response: Response): Promise<string> {
   const decoder = new TextDecoder("utf-8")
   let buffer = ""
   let fullText = ""
+  let finishReason: string | null = null
 
   while (true) {
     const { value, done } = await reader.read()
@@ -105,7 +124,10 @@ async function readStreamToText(response: Response): Promise<string> {
 
       const data = trimmed.slice(5).trim()
       if (data === "[DONE]") {
-        return fullText.trim()
+        return {
+          content: fullText.trim(),
+          finishReason,
+        }
       }
 
       let chunk: any
@@ -114,7 +136,11 @@ async function readStreamToText(response: Response): Promise<string> {
       } catch {
         throw new Error("API 返回格式異常：串流片段無法解析")
       }
-      const delta = chunk.choices?.[0]?.delta?.content
+      const choice = chunk.choices?.[0]
+      const delta = choice?.delta?.content
+      if (typeof choice?.finish_reason === "string") {
+        finishReason = choice.finish_reason
+      }
       if (typeof delta === "string") {
         fullText += delta
       }
@@ -122,7 +148,10 @@ async function readStreamToText(response: Response): Promise<string> {
   }
 
   if (fullText.trim()) {
-    return fullText.trim()
+    return {
+      content: fullText.trim(),
+      finishReason,
+    }
   }
 
   throw new Error("API 返回格式異常：串流結果為空")
@@ -132,7 +161,7 @@ async function requestChatCompletion(
   config: AppConfig,
   messages: ChatMessage[],
   options: ChatRequestOptions,
-): Promise<string> {
+): Promise<ChatCompletionResult> {
   const response = await fetch(`${config.apiEndpoint}/chat/completions`, {
     method: "POST",
     headers: {
@@ -140,6 +169,7 @@ async function requestChatCompletion(
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(buildRequestBody(config, messages, options)),
+    signal: options.signal,
   })
 
   if (!response.ok) {
@@ -152,20 +182,33 @@ async function requestChatCompletion(
   }
 
   const data = await response.json()
-  return data.choices[0]?.message?.content?.trim() ?? ""
+  const choice = data.choices?.[0]
+
+  return {
+    content: typeof choice?.message?.content === "string" ? choice.message.content : "",
+    finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError"
 }
 
 async function requestWithRetry(
   config: AppConfig,
   messages: ChatMessage[],
   options: ChatRequestOptions,
-): Promise<string> {
+): Promise<ChatCompletionResult> {
   let attempt = 0
 
   while (attempt <= DEFAULT_RETRY_TIMES) {
     try {
       return await requestChatCompletion(config, messages, options)
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+
       attempt += 1
       const message = error instanceof Error ? error.message : "未知錯誤"
       const matchedStatus = message.match(/\b(\d{3})\b/)
@@ -182,7 +225,40 @@ async function requestWithRetry(
   throw new Error("API 請求失敗")
 }
 
-export async function callChatAPI(config: AppConfig, messages: ChatMessage[]): Promise<string> {
+async function requestWithContinuation(
+  config: AppConfig,
+  messages: ChatMessage[],
+  options: ChatRequestOptions,
+  continuationMessage: ChatMessage,
+): Promise<string> {
+  let requestMessages = [...messages]
+  let output = ""
+  let rounds = 0
+
+  while (rounds <= MAX_CONTINUATION_ROUNDS) {
+    const result = await requestWithRetry(config, requestMessages, options)
+    output += result.content
+
+    if (result.finishReason !== "length") {
+      return output.trim()
+    }
+
+    requestMessages = [
+      ...requestMessages,
+      { role: "assistant", content: result.content },
+      continuationMessage,
+    ]
+    rounds += 1
+  }
+
+  return output.trim()
+}
+
+export async function callChatAPI(
+  config: AppConfig,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): Promise<string> {
   const normalizedMessages = messages.map((message) => {
     if (message.role !== "user") {
       return message
@@ -199,16 +275,35 @@ export async function callChatAPI(config: AppConfig, messages: ChatMessage[]): P
     ...normalizedMessages,
   ]
 
+  const continuationMessage: ChatMessage = {
+    role: "user",
+    content: buildContinuationMessageEnvelope(),
+  }
+
   try {
-    return await requestWithRetry(config, requestMessages, { stream: true, temperature: 0.7 })
+    return await requestWithContinuation(
+      config,
+      requestMessages,
+      { stream: true, temperature: 0.7, signal },
+      continuationMessage,
+    )
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+
     const message = error instanceof Error ? error.message : ""
     const canFallback = message.includes("API 返回格式異常")
     if (!canFallback) {
       throw error
     }
 
-    return requestWithRetry(config, requestMessages, { stream: false, temperature: 0.7 })
+    return requestWithContinuation(
+      config,
+      requestMessages,
+      { stream: false, temperature: 0.7, signal },
+      continuationMessage,
+    )
   }
 }
 
@@ -250,7 +345,11 @@ export function parseAgentResponse(content: string): AgentResponse {
   }
 }
 
-export async function translateText(config: AppConfig, text: string): Promise<string> {
+export async function translateText(
+  config: AppConfig,
+  text: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const messages: ChatMessage[] = [
     {
       role: "user",
@@ -258,9 +357,18 @@ export async function translateText(config: AppConfig, text: string): Promise<st
     },
   ]
 
-  return requestWithRetry(config, messages, {
-    stream: false,
-    temperature: 0.3,
-    maxTokens: 2000,
-  })
+  return requestWithContinuation(
+    config,
+    messages,
+    {
+      stream: false,
+      temperature: 0.3,
+      maxTokens: 2000,
+      signal,
+    },
+    {
+      role: "user",
+      content: "請接續上一段翻譯並只返回尚未完成的內容，不要重複。",
+    },
+  )
 }

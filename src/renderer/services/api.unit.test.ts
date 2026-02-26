@@ -151,6 +151,34 @@ describe("callChatAPI", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it("串流回應因長度中斷時應自動續接", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        createStreamResponse([
+          'data: {"choices":[{"delta":{"content":"part-1"},"finish_reason":"length"}]}\n',
+          "data: [DONE]\n",
+        ]),
+      )
+      .mockResolvedValueOnce(
+        createStreamResponse([
+          'data: {"choices":[{"delta":{"content":"part-2"},"finish_reason":"stop"}]}\n',
+          "data: [DONE]\n",
+        ]),
+      )
+
+    const result = await callChatAPI(baseConfig, [{ role: "user", content: "hello" }])
+    expect(result).toBe("part-1part-2")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    const continuationMessage = secondBody.messages[secondBody.messages.length - 1]
+    expect(continuationMessage.role).toBe("user")
+    expect(JSON.parse(String(continuationMessage.content))).toMatchObject({
+      task: "continue_output",
+    })
+  })
+
   it("不可重試錯誤應直接拋出", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -162,6 +190,17 @@ describe("callChatAPI", () => {
     )
 
     await expect(callChatAPI(baseConfig, [])).rejects.toThrow("invalid key")
+  })
+
+  it("AbortError 應直接中止，不進行回退或重試", async () => {
+    const abortError = new Error("aborted")
+    abortError.name = "AbortError"
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError)
+    await expect(callChatAPI(baseConfig, [{ role: "user", content: "hello" }])).rejects.toMatchObject({
+      name: "AbortError",
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -178,5 +217,35 @@ describe("translateText", () => {
 
     const result = await translateText(baseConfig, "測試")
     expect(result).toBe("Translated")
+  })
+
+  it("翻譯遇到長度限制時應自動續接", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "段落一" }, finish_reason: "length" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "段落二" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+
+    const result = await translateText(baseConfig, "測試")
+    expect(result).toBe("段落一段落二")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    const continuationMessage = secondBody.messages[secondBody.messages.length - 1]
+    expect(continuationMessage.role).toBe("user")
+    expect(continuationMessage.content).toContain("請接續上一段翻譯")
   })
 })

@@ -12,6 +12,12 @@ interface SettingsDraft {
   systemPrompt: string
 }
 
+type DialogStage = "input" | "refining" | "confirming" | "translating" | "result"
+
+function isAbortError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "AbortError"
+}
+
 function LoadingDots() {
   return (
     <div className="loading">
@@ -26,6 +32,8 @@ function LoadingDots() {
 
 export default function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const requestAbortControllerRef = useRef<AbortController | null>(null)
+  const isCancellingRef = useRef(false)
   const { config, isLoaded, loadConfig, saveConfig } = useConfigStore()
   const {
     stage,
@@ -89,6 +97,32 @@ export default function App() {
     return currentInput.trim().length > 0 && !isLoading
   }, [currentInput, isLoading])
 
+  const cancelCurrentRequest = useCallback(() => {
+    const currentController = requestAbortControllerRef.current
+    if (!currentController) {
+      return false
+    }
+
+    isCancellingRef.current = true
+    requestAbortControllerRef.current = null
+    currentController.abort()
+    setLoading(false)
+    setError(null)
+    return true
+  }, [setError, setLoading])
+
+  const recoverAfterAbort = useCallback(
+    (fallbackStage: DialogStage) => {
+      if (isCancellingRef.current) {
+        addMessage({ role: "system", content: "已中止當前請求" })
+        isCancellingRef.current = false
+      }
+
+      setStage(optimizedText ? "confirming" : fallbackStage)
+    },
+    [addMessage, optimizedText, setStage],
+  )
+
   const ensureAPIReady = (): boolean => {
     if (!config.apiKey) {
       setError("尚未配置 API Key，請先到設定頁完成配置")
@@ -99,8 +133,8 @@ export default function App() {
     return true
   }
 
-  const runRefine = async (nextMessages: ChatMessage[]) => {
-    const content = await callChatAPI(config, nextMessages)
+  const runRefine = async (nextMessages: ChatMessage[], signal?: AbortSignal) => {
+    const content = await callChatAPI(config, nextMessages, signal)
     const parsed = parseAgentResponse(content)
     const firstUserMessage = nextMessages.find((message) => message.role === "user")?.content || ""
     const baselineText = optimizedText || firstUserMessage
@@ -122,7 +156,7 @@ export default function App() {
       setOptions([])
       setStage("translating")
 
-      const translated = await translateText(config, sourceText)
+      const translated = await translateText(config, sourceText, signal)
       setTranslatedText(translated)
       setStage("result")
       return
@@ -145,18 +179,28 @@ export default function App() {
     }
 
     const userMessage: ChatMessage = { role: "user", content: trimmed }
+    const previousStage = stage
+    const abortController = new AbortController()
 
     try {
+      requestAbortControllerRef.current = abortController
       setLoading(true)
       setError(null)
       setCurrentInput("")
       addMessage(userMessage)
 
       const nextMessages = [...messages, userMessage]
-      await runRefine(nextMessages)
+      await runRefine(nextMessages, abortController.signal)
     } catch (requestError) {
+      if (isAbortError(requestError)) {
+        recoverAfterAbort(previousStage)
+        return
+      }
       setError(requestError instanceof Error ? requestError.message : "請求失敗")
     } finally {
+      if (requestAbortControllerRef.current === abortController) {
+        requestAbortControllerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -176,18 +220,28 @@ export default function App() {
       optimizedText || messages.find((message) => message.role === "user")?.content || ""
     const prompt = `請根據以下方向優化文字：${option.label}\n\n原文：${baseText}`
     const userMessage: ChatMessage = { role: "user", content: prompt }
+    const previousStage = stage
+    const abortController = new AbortController()
 
     try {
+      requestAbortControllerRef.current = abortController
       setLoading(true)
       setError(null)
       addMessage({ role: "system", content: `已選擇：${option.label}` })
       addMessage(userMessage)
 
       const nextMessages = [...messages, userMessage]
-      await runRefine(nextMessages)
+      await runRefine(nextMessages, abortController.signal)
     } catch (requestError) {
+      if (isAbortError(requestError)) {
+        recoverAfterAbort(previousStage)
+        return
+      }
       setError(requestError instanceof Error ? requestError.message : "優化失敗")
     } finally {
+      if (requestAbortControllerRef.current === abortController) {
+        requestAbortControllerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -204,17 +258,28 @@ export default function App() {
       return
     }
 
+    const previousStage = stage
+    const abortController = new AbortController()
+
     try {
+      requestAbortControllerRef.current = abortController
       setLoading(true)
       setError(null)
       setStage("translating")
-      const translated = await translateText(config, sourceText)
+      const translated = await translateText(config, sourceText, abortController.signal)
       setTranslatedText(translated)
       setStage("result")
     } catch (requestError) {
+      if (isAbortError(requestError)) {
+        recoverAfterAbort(previousStage)
+        return
+      }
       setError(requestError instanceof Error ? requestError.message : "翻譯失敗")
       setStage("confirming")
     } finally {
+      if (requestAbortControllerRef.current === abortController) {
+        requestAbortControllerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -242,6 +307,9 @@ export default function App() {
   const handleEsc = async (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault()
+      if (isLoading && cancelCurrentRequest()) {
+        return
+      }
       await window.electronAPI.hideWindow()
       return
     }
@@ -298,6 +366,20 @@ export default function App() {
     window.addEventListener("keydown", handleGlobalNewSession)
     return () => window.removeEventListener("keydown", handleGlobalNewSession)
   }, [handleGlobalNewSession])
+
+  useEffect(() => {
+    const handleGlobalEsc = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || showSettings || !isLoading) {
+        return
+      }
+
+      event.preventDefault()
+      cancelCurrentRequest()
+    }
+
+    window.addEventListener("keydown", handleGlobalEsc)
+    return () => window.removeEventListener("keydown", handleGlobalEsc)
+  }, [cancelCurrentRequest, isLoading, showSettings])
 
   if (!isLoaded) {
     return <LoadingDots />
@@ -425,7 +507,7 @@ export default function App() {
                 <div className="empty-icon">✨</div>
                 <div className="empty-title">開始優化文字</div>
                 <div className="empty-desc">
-                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc 可收起視窗，CommandOrControl+N 可開新會話。
+                  輸入文字後按 Enter 發送，Shift+Enter 換行，Esc 可中止請求或收起視窗，CommandOrControl+N 可開新會話。
                 </div>
               </div>
             ) : (

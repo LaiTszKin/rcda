@@ -30,4 +30,28 @@ describe("chat flow integration", () => {
     const result = await callChatAPI(baseConfig, [{ role: "user", content: "hello" }])
     expect(result).toBe("integration result")
   })
+
+  it("非 stream 回退遇到長度限制時會繼續拿完整內容", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "first" }, finish_reason: "length" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: " second" }, finish_reason: "stop" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+
+    const result = await callChatAPI(baseConfig, [{ role: "user", content: "hello" }])
+    expect(result).toBe("first second")
+  })
 })
